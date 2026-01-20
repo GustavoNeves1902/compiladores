@@ -1,0 +1,5 @@
+/* comentario
+
+int main() {
+    int variavel1 = "texto errado"
+}
