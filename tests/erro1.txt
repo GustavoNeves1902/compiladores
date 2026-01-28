@@ -1,0 +1,23 @@
+int main() {
+    int a;
+    string s;
+    s <- "Erro Semantico";
+
+    # --- ERRO LÉXICO ---
+    # O caractere @ não existe na linguagem
+    a <- @; 
+
+    # --- ERRO SINTÁTICO ---
+    # Falta de parênteses no IF e falta de valor na atribuição
+    if a > 0 {
+        a <- ;
+    }
+
+    # --- ERRO SEMÂNTICO ---
+    # Tentativa de somar tipos incompatíveis (int + string)
+    a <- a + s;
+
+    # --- ERRO SEMÂNTICO ---
+    # Variável não declarada
+    z <- 100;
+}
