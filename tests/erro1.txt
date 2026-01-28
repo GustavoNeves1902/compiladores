@@ -9,7 +9,7 @@ int main() {
     a <- @; 
 
     # --- ERRO SINTÁTICO ---
-    # Falta de parênteses no IF e falta de valor na atribuição
+    #falta de valor na atribuição
     if a > 0 {
         a <- ;
     }
