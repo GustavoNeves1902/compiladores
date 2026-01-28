@@ -7,51 +7,63 @@
 
 extern int linha;
 extern int coluna;
-extern int yychar;       // Token atual
-extern char *yytext;     // Texto do token atual
+extern int yychar;
+extern char *yytext;
+extern FILE *yyin;
 
 no *raiz_arvore = NULL;
 
+void erro_semantico(const char *msg, const char *detalhe);
 void yyerror(const char *s);
 extern int yylex();
-extern int yyparse();
-extern FILE *yyin;
+
+const char* nome_tipo(int tipo) {
+    switch (tipo) {
+        case T_INT:    return "int";
+        case T_FLOAT:  return "float";
+        case T_STRING: return "string";
+        case T_CHAR:   return "char";
+        case T_VOID:   return "void";
+        case T_ERRO:   return "erro";
+        default:       return "desconhecido";
+    }
+}
 
 %}
 
+%error-verbose
+
 %union {
-    int atributo;
-    struct no *node;
+    int tipo_val;       
+    struct no *node;    
 }
 
-%token IMPORT IDENTIFICADOR INPUT PRINT
-%token NUMERO_INTEIRO NUMERO_REAL
+%token <node> IDENTIFICADOR NUMERO_INTEIRO NUMERO_REAL STRING CARACTER
+%token IMPORT INPUT PRINT
 %token TIPO_INTEIRO TIPO_CARACTER TIPO_BOOL TIPO_STRING TIPO_FLOAT TIPO_DOUBLE TIPO_VOID
 %token OPERADOR_ATRIBUICAO ATRIBUICAO_CONDICIONAL
 %token ACUMULADOR_SOMA ACUMULADOR_SUBTRACAO
-%token PONTO_E_VIRGULA
-%token VIRGULA
-%token CARACTER
-%token STRING
-%token CHAVE_E CHAVE_D
-%token PARENTESE_E PARENTESE_D
-%token WHILE FOR
-%token RETURN
-%token BREAK
-%token COLCHETE_E COLCHETE_D
-%token IF ELSE
+%token PONTO_E_VIRGULA VIRGULA
+%token CHAVE_E CHAVE_D PARENTESE_E PARENTESE_D
+%token WHILE FOR RETURN BREAK COLCHETE_E COLCHETE_D IF ELSE
 %token STRING_MAL_FORMADA COMENTARIO_SEM_FECHADOR NUM_MAL_FORMADO
 %token NE EQ GE LE MENOR_QUE MAIOR_QUE
 %token OPERADOR_SOMA OPERADOR_SUBTRACAO OPERADOR_MULTIPLICACAO OPERADOR_DIVISAO OPERADOR_MODULO
 %token INCREMENTO DECREMENTO
 %token LOGICO_AND LOGICO_OR LOGICO_NOT
-%left GE LE EQ NE MAIOR_QUE MENOR_QUE
-%right LOGICO_NOT
-%left LOGICO_AND
-%left LOGICO_OR
 %token COMENTARIO_BLOCO COMENTARIO_LINHA
 
-%type <node> programa lista_declaracoes declaracao declaracao_variavel declaracao_funcao estrutura_controle bloco expressao lista_argumentos lista_parametros 
+%left LOGICO_OR
+%left LOGICO_AND
+%left EQ NE
+%left GE LE MAIOR_QUE MENOR_QUE
+%left OPERADOR_SOMA OPERADOR_SUBTRACAO
+%left OPERADOR_MULTIPLICACAO OPERADOR_DIVISAO OPERADOR_MODULO
+%right OPERADOR_ATRIBUICAO ATRIBUICAO_CONDICIONAL
+%right LOGICO_NOT
+%right INCREMENTO DECREMENTO
+
+%type <node> programa lista_declaracoes declaracao declaracao_variavel declaracao_funcao estrutura_controle bloco lista_argumentos lista_parametros expressao 
 
 %start programa
 
@@ -59,124 +71,104 @@ extern FILE *yyin;
 
 expressao
     : IDENTIFICADOR
-        { $$ = cria_no("IDENTIFICADOR", NULL, 0); }
-    | NUMERO_INTEIRO
-        { $$ = cria_no("NUMERO_INTEIRO", NULL, 0); }
-    | NUMERO_REAL
-        { $$ = cria_no("NUMERO_REAL", NULL, 0); }
-    | STRING
-        { $$ = cria_no("STRING", NULL, 0); }
-    | CARACTER
-        { $$ = cria_no("CARACTER", NULL, 0); }
+        { 
+            Token* s = buscar_simbolo($1->rotulo);
+            $$ = $1;
+            if (!s) {
+                erro_semantico("Variavel nao declarada", $1->rotulo);
+                $$->tipo_dado = T_ERRO;
+            } else {
+                $$->tipo_dado = s->tipo_dado; 
+            }
+        }
+    | NUMERO_INTEIRO { $$ = $1; $$->tipo_dado = T_INT; }
+    | NUMERO_REAL    { $$ = $1; $$->tipo_dado = T_FLOAT; }
+    | STRING         { $$ = $1; $$->tipo_dado = T_STRING; }
+    | CARACTER       { $$ = $1; $$->tipo_dado = T_CHAR; }
     | expressao OPERADOR_SOMA expressao
         {
-          no *filhos[3] = { $1, cria_no("OPERADOR_SOMA", NULL, 0), $3 };
-          $$ = cria_no("OPERADOR_SOMA_EXPR", filhos, 3);
+            if ($1->tipo_dado == T_STRING || $3->tipo_dado == T_STRING) {
+                erro_semantico("Operacao '+' invalida para strings", "");
+                // Criamos o nó de erro para manter a árvore crescendo
+                no *filhos[3] = { $1, cria_no("+", NULL, 0), $3 };
+                $$ = cria_no("OPERADOR_SOMA_EXPR", filhos, 3);
+                $$->tipo_dado = T_ERRO;
+            } else {
+                no *filhos[3] = { $1, cria_no("+", NULL, 0), $3 };
+                $$ = cria_no("OPERADOR_SOMA_EXPR", filhos, 3);
+                $$->tipo_dado = ($1->tipo_dado == T_FLOAT || $3->tipo_dado == T_FLOAT) ? T_FLOAT : T_INT;
+            }
         }
     | expressao OPERADOR_SUBTRACAO expressao
         {
-          no *filhos[3] = { $1, cria_no("OPERADOR_SUBTRACAO", NULL, 0), $3 };
-          $$ = cria_no("OPERADOR_SUBTRACAO_EXPR", filhos, 3);
+        // 1. Criamos o nó da operação primeiro
+        no *filhos[3] = { $1, cria_no("-", NULL, 0), $3 };
+        $$ = cria_no("OPERADOR_SUBTRACAO_EXPR", filhos, 3);
+
+        // 2. Definimos o tipo do novo nó com base nos tipos dos filhos
+        // Se qualquer um for FLOAT, o resultado da subtração é FLOAT. Caso contrário, INT.
+        if ($1->tipo_dado == T_FLOAT || $3->tipo_dado == T_FLOAT) {
+            $$->tipo_dado = T_FLOAT;
+        } else {
+            $$->tipo_dado = T_INT;
         }
-    | expressao OPERADOR_MULTIPLICACAO expressao
-        {
-          no *filhos[3] = { $1, cria_no("OPERADOR_MULTIPLICACAO", NULL, 0), $3 };
-          $$ = cria_no("OPERADOR_MULTIPLICACAO_EXPR", filhos, 3);
+    }
+    | PARENTESE_E expressao PARENTESE_D
+        { 
+            $$ = $2; // Apenas repassa o nó da expressão interna
         }
-    | expressao OPERADOR_DIVISAO expressao
+    | expressao ATRIBUICAO_CONDICIONAL expressao
         {
-          no *filhos[3] = { $1, cria_no("OPERADOR_DIVISAO", NULL, 0), $3 };
-          $$ = cria_no("OPERADOR_DIVISAO_EXPR", filhos, 3);
+            if ($1->tipo_dado != $3->tipo_dado && !($1->tipo_dado == T_FLOAT && $3->tipo_dado == T_INT)) {
+                char buffer[100];
+                sprintf(buffer, "Conflito: %s <- %s", nome_tipo($1->tipo_dado), nome_tipo($3->tipo_dado));
+                erro_semantico("Tipos incompativeis na atribuicao", buffer);
+            }
+            no *filhos[3] = { $1, cria_no("<-", NULL, 0), $3 };
+            $$ = cria_no("ATRIBUICAO_EXPR", filhos, 3);
+            $$->tipo_dado = $1->tipo_dado;
         }
-    | expressao OPERADOR_MODULO expressao
+      | expressao OPERADOR_ATRIBUICAO expressao
         {
-          no *filhos[3] = { $1, cria_no("OPERADOR_MODULO", NULL, 0), $3 };
-          $$ = cria_no("OPERADOR_MODULO_EXPR", filhos, 3);
+            if ($1->tipo_dado != $3->tipo_dado && !($1->tipo_dado == T_FLOAT && $3->tipo_dado == T_INT)) {
+                erro_semantico("Tipos incompativeis na atribuicao", "");
+            }
+            no *filhos[3] = { $1, cria_no("=", NULL, 0), $3 };
+            $$ = cria_no("ATRIBUICAO_SIMPLES", filhos, 3);
+            $$->tipo_dado = $1->tipo_dado;
         }
-    | expressao ACUMULADOR_SOMA expressao
-        {
-          no *filhos[3] = { $1, cria_no("ACUMULADOR_SOMA", NULL, 0), $3 };
-          $$ = cria_no("ACUMULADOR_SOMA_EXPR", filhos, 3);
+        | expressao ATRIBUICAO_CONDICIONAL error 
+        { 
+            erro_semantico("Falta o valor ou expressao para a atribuicao", ""); 
+            yyerrok; 
+            yyclearin;
         }
-    | expressao ACUMULADOR_SUBTRACAO expressao
-        {
-          no *filhos[3] = { $1, cria_no("ACUMULADOR_SUBTRACAO", NULL, 0), $3 };
-          $$ = cria_no("ACUMULADOR_SUBTRACAO_EXPR", filhos, 3);
+    | expressao OPERADOR_ATRIBUICAO error 
+        { 
+            erro_semantico("Falta o valor ou expressao para a atribuicao", ""); 
+            yyerrok; 
+            yyclearin;
         }
-    | expressao INCREMENTO
+        | expressao MAIOR_QUE expressao
         {
-          no *filhos[2] = { $1, cria_no("INCREMENTO", NULL, 0) };
-          $$ = cria_no("INCREMENTO_EXPR", filhos, 2);
-        }
-    | expressao DECREMENTO
-        {
-          no *filhos[2] = { $1, cria_no("DECREMENTO", NULL, 0) };
-          $$ = cria_no("DECREMENTO_EXPR", filhos, 2);
-        }
-    | expressao GE expressao
-        {
-          no *filhos[3] = { $1, cria_no("GE", NULL, 0), $3 };
-          $$ = cria_no("GE_EXPR", filhos, 3);
-        }
-    | expressao LE expressao
-        {
-          no *filhos[3] = { $1, cria_no("LE", NULL, 0), $3 };
-          $$ = cria_no("LE_EXPR", filhos, 3);
-        }
-    | expressao EQ expressao
-        {
-          no *filhos[3] = { $1, cria_no("EQ", NULL, 0), $3 };
-          $$ = cria_no("EQ_EXPR", filhos, 3);
-        }
-    | expressao NE expressao
-        {
-          no *filhos[3] = { $1, cria_no("NE", NULL, 0), $3 };
-          $$ = cria_no("NE_EXPR", filhos, 3);
-        }
-    | expressao MAIOR_QUE expressao
-        {
-          no *filhos[3] = { $1, cria_no("MAIOR_QUE", NULL, 0), $3 };
-          $$ = cria_no("MAIOR_QUE_EXPR", filhos, 3);
+            no *filhos[3] = { $1, cria_no(">", NULL, 0), $3 };
+            $$ = cria_no("COMP_MAIOR", filhos, 3);
+            $$->tipo_dado = T_BOOL; // Ou T_INT se não tiver bool
         }
     | expressao MENOR_QUE expressao
         {
-          no *filhos[3] = { $1, cria_no("MENOR_QUE", NULL, 0), $3 };
-          $$ = cria_no("MENOR_QUE_EXPR", filhos, 3);
-        }
-    | expressao LOGICO_AND expressao
-        {
-          no *filhos[3] = { $1, cria_no("LOGICO_AND", NULL, 0), $3 };
-          $$ = cria_no("LOGICO_AND_EXPR", filhos, 3);
-        }
-    | expressao LOGICO_OR expressao
-        {
-          no *filhos[3] = { $1, cria_no("LOGICO_OR", NULL, 0), $3 };
-          $$ = cria_no("LOGICO_OR_EXPR", filhos, 3);
-        }
-    | LOGICO_NOT expressao
-        {
-          no *filhos[2] = { cria_no("LOGICO_NOT", NULL, 0), $2 };
-          $$ = cria_no("LOGICO_NOT_EXPR", filhos, 2);
-        }
-    | '(' expressao ')'
-        { $$ = $2; }
-    | expressao ATRIBUICAO_CONDICIONAL expressao
-        {
-          no *filhos[3] = { $1, cria_no("ATRIBUICAO_CONDICIONAL", NULL, 0), $3 };
-          $$ = cria_no("ATRIBUICAO_CONDICIONAL_EXPR", filhos, 3);
-        }
-    | IDENTIFICADOR PARENTESE_E PARENTESE_D
-        {
-          no *filhos[2] = { cria_no("IDENTIFICADOR", NULL, 0), cria_no("PARAMETROS_VAZIOS", NULL, 0) };
-          $$ = cria_no("CHAMADA_FUNC_SIMPLES", filhos, 2);
+            no *filhos[3] = { $1, cria_no("<", NULL, 0), $3 };
+            $$ = cria_no("COMP_MENOR", filhos, 3);
+            $$->tipo_dado = T_BOOL;
         }
     | IDENTIFICADOR PARENTESE_E lista_argumentos PARENTESE_D
         {
-          no *filhos[2] = { cria_no("IDENTIFICADOR", NULL, 0), $3 };
-          $$ = cria_no("CHAMADA_FUNC_ARGS", filhos, 2);
-        }
+        Token* s = buscar_simbolo($1->rotulo);
+        no *filhos[2] = { $1, $3 };
+        $$ = cria_no("CHAMADA_FUNCAO", filhos, 2);
+        $$->tipo_dado = s ? s->tipo_dado : T_VOID; // Salva o tipo no nó criado
+    }
     ;
-
 
 programa
     : lista_declaracoes { raiz_arvore = $1; }
@@ -190,139 +182,144 @@ lista_declaracoes
         }
     | declaracao
         {
-          no *filhos[1] = { $1 };
-          $$ = cria_no("declaracao", filhos, 1);
+          // Simplificando: o primeiro elemento da lista é a própria declaração
+          $$ = $1; 
         }
     ;
 
 lista_argumentos
-    : expressao
-        {
-          no *filhos[1] = { $1 };
-          $$ = cria_no("argumento", filhos, 1);
+    : expressao 
+        { 
+          no *f[1] = { $1 }; // Removido $<node>
+          $$ = cria_no("argumento", f, 1); 
         }
-    | lista_argumentos VIRGULA expressao
-        {
-          no *filhos[2] = { $1, $3 };
-          $$ = cria_no("argumento_lista", filhos, 2);
+    | lista_argumentos VIRGULA expressao 
+        { 
+          no *f[2] = { $1, $3 }; // Removido $<node>
+          $$ = cria_no("lista_argumentos", f, 2); 
         }
+    | /* vazio */ { $$ = cria_no("sem_argumentos", NULL, 0); }
+    ;
+
+declaracao_variavel
+    : TIPO_INTEIRO IDENTIFICADOR PONTO_E_VIRGULA
+        {
+          if (buscar_simbolo($2->rotulo)) erro_semantico("Redeclaracao", $2->rotulo);
+          else inserir_simbolo($2->rotulo, "VAR", T_INT, linha);
+          no *f[1] = { $2 };
+          $$ = cria_no("decl_int", f, 1);
+          $$->tipo_dado = T_INT;
+        }
+    | TIPO_FLOAT IDENTIFICADOR PONTO_E_VIRGULA
+        {
+          if (buscar_simbolo($2->rotulo)) erro_semantico("Redeclaracao", $2->rotulo);
+          else inserir_simbolo($2->rotulo, "VAR", T_FLOAT, linha);
+          no *f[1] = { $2 };
+          $$ = cria_no("decl_float", f, 1);
+          $$->tipo_dado = T_FLOAT;
+        }
+    | TIPO_STRING IDENTIFICADOR PONTO_E_VIRGULA  /* <--- ADICIONE ESTA LINHA */
+        {
+          if (buscar_simbolo($2->rotulo)) erro_semantico("Redeclaracao", $2->rotulo);
+          else inserir_simbolo($2->rotulo, "VAR", T_STRING, linha);
+          no *f[1] = { $2 };
+          $$ = cria_no("decl_string", f, 1);
+          $$->tipo_dado = T_STRING;
+        }
+    ;
+
+declaracao_funcao
+    : TIPO_INTEIRO IDENTIFICADOR PARENTESE_E lista_parametros PARENTESE_D bloco
+        {
+            inserir_simbolo($2->rotulo, "FUNC", T_INT, linha);
+          no *filhos[3] = { $2, $4, $6 };
+          $$ = cria_no("declaracao_funcao", filhos, 3);
+        }
+    ;
+
+lista_parametros
+    : TIPO_INTEIRO IDENTIFICADOR 
+        { 
+          inserir_simbolo(yytext, "PARAM", T_INT, linha);
+          no *f[1] = { $2 };
+          $$ = cria_no("parametro", f, 1); 
+        }
+    | lista_parametros VIRGULA TIPO_INTEIRO IDENTIFICADOR 
+        { 
+          inserir_simbolo(yytext, "PARAM", T_INT, linha);
+          no *f[2] = { $1, $4 };
+          $$ = cria_no("lista_parametros", f, 2); 
+        }
+    | /* vazio */ { $$ = cria_no("sem_parametros", NULL, 0); }
     ;
 
 declaracao
     : declaracao_variavel { $$ = $1; }
     | declaracao_funcao { $$ = $1; }
     | estrutura_controle { $$ = $1; }
-    | IMPORT IDENTIFICADOR PONTO_E_VIRGULA
-        {
-          no *filhos[2] = { cria_no("IMPORT", NULL, 0), cria_no("IDENTIFICADOR", NULL, 0) };
-          $$ = cria_no("declaracao_import", filhos, 2);
+    | expressao PONTO_E_VIRGULA { $$ = $1; }
+    | RETURN expressao PONTO_E_VIRGULA 
+        { 
+            no *f[1] = { $2 }; 
+            $$ = cria_no("RETURN", f, 1); 
         }
-    | RETURN expressao PONTO_E_VIRGULA
-        {
-          no *filhos[1] = { $2 };
-          $$ = cria_no("RETURN", filhos, 1);
-        }
-    ;
-
-declaracao_variavel
-    : TIPO_INTEIRO IDENTIFICADOR PONTO_E_VIRGULA
-        {
-          no *filhos[2] = { cria_no("TIPO_INTEIRO", NULL, 0), cria_no("IDENTIFICADOR", NULL, 0) };
-          $$ = cria_no("declaracao_variavel", filhos, 2);
-        }
-    | TIPO_INTEIRO IDENTIFICADOR OPERADOR_ATRIBUICAO expressao PONTO_E_VIRGULA
-        {
-          no *filhos[3] = { cria_no("TIPO_INTEIRO", NULL, 0), cria_no("IDENTIFICADOR", NULL, 0), cria_no("ATRIBUICAO", NULL, 0) };
-          no *atribuicao_filho[2] = { filhos[2], $4 };
-          no *atribuicao = cria_no("atribuicao", atribuicao_filho, 2);
-          no *filhos_com_atribuicao[2] = { filhos[0], atribuicao };
-          $$ = cria_no("declaracao_variavel", filhos_com_atribuicao, 2);
-        }
-    /* Repita para outros tipos e casos seguindo a mesma lógica */
-    ;
-
-declaracao_funcao
-    : TIPO_INTEIRO IDENTIFICADOR PARENTESE_E PARENTESE_D bloco
-        {
-          no *filhos[3] = {
-            cria_no("TIPO_INTEIRO", NULL, 0),
-            cria_no("IDENTIFICADOR", NULL, 0),
-            $5
-          };
-          $$ = cria_no("declaracao_funcao", filhos, 3);
-        }
-    | TIPO_INTEIRO IDENTIFICADOR PARENTESE_E lista_parametros PARENTESE_D bloco
-        {
-          no *filhos[4] = {
-            cria_no("TIPO_INTEIRO", NULL, 0),
-            cria_no("IDENTIFICADOR", NULL, 0),
-            $4,
-            $6
-          };
-          $$ = cria_no("declaracao_funcao", filhos, 4);
-        }
-    /* Repita para outros tipos */
-    ;
-
-lista_parametros
-    : TIPO_INTEIRO IDENTIFICADOR
-        {
-          no *filhos[2] = { cria_no("TIPO_INTEIRO", NULL, 0), cria_no("IDENTIFICADOR", NULL, 0) };
-          $$ = cria_no("parametro", filhos, 2);
-        }
-    | lista_parametros VIRGULA TIPO_INTEIRO IDENTIFICADOR
-        {
-          no *param = cria_no("parametro", (no*[]){ cria_no("TIPO_INTEIRO", NULL, 0), cria_no("IDENTIFICADOR", NULL, 0) }, 2);
-          no *filhos[2] = { $1, param };
-          $$ = cria_no("lista_parametros", filhos, 2);
+    | error PONTO_E_VIRGULA 
+        { 
+            yyerrok; // Diz ao Bison que o erro foi tratado e ele pode continuar
+            yyclearin;
+            $$ = cria_no("ERRO_SINTATICO", NULL, 0); 
         }
     ;
 
 estrutura_controle
-    : IF PARENTESE_E expressao PARENTESE_D bloco ELSE bloco
-        {
-          no *filhos[3] = { $3, $5, $7 };
-          $$ = cria_no("IF_ELSE", filhos, 3);
-        }
-    | IF PARENTESE_E expressao PARENTESE_D bloco
+    : IF PARENTESE_E expressao PARENTESE_D bloco
         {
           no *filhos[2] = { $3, $5 };
           $$ = cria_no("IF", filhos, 2);
         }
-    | WHILE PARENTESE_E expressao PARENTESE_D bloco
+    /* REGRA PARA CAPTURAR O ERRO DE PARÊNTESES */
+    | IF expressao CHAVE_E lista_declaracoes CHAVE_D
         {
-          no *filhos[2] = { $3, $5 };
-          $$ = cria_no("WHILE", filhos, 2);
+            erro_semantico("Estrutura IF mal formada: faltam os parenteses '(' e ')'", "");
+            yyerrok;
+            $$ = cria_no("IF_ERRO", NULL, 0);
         }
-    | FOR PARENTESE_E declaracao_variavel expressao PONTO_E_VIRGULA expressao PARENTESE_D bloco
-        {
-        no *condicao_iteracao = cria_no("condicao_iteracao", (no*[]){ $4, $6 }, 2);
-        no *variavel = cria_no("variavel", (no*[]){ $3 }, 1);
-        no *filhos[3] = { variavel, condicao_iteracao, $8 };
-        $$ = cria_no("FOR", filhos, 3);
+    /* REGRA DE ERRO GENÉRICA */
+    | IF error bloco 
+        { 
+            erro_semantico("Erro sintatico no IF", "");
+            yyerrok; 
+            $$ = cria_no("IF_ERRO", NULL, 0);
         }
     ;
 
 bloco
-    : CHAVE_E lista_declaracoes CHAVE_D
-        {
-          no *filhos[1] = { $2 };
-          $$ = cria_no("bloco", filhos, 1);
+    : CHAVE_E lista_declaracoes CHAVE_D 
+        { 
+          no *f[1] = { $2 };
+          $$ = cria_no("bloco", f, 1); 
         }
-    | CHAVE_E CHAVE_D
-        {
-          $$ = cria_no("bloco_vazio", NULL, 0);
+    | CHAVE_E error CHAVE_D 
+        { 
+            yyerrok; 
+            $$ = cria_no("bloco_com_erro", NULL, 0); 
         }
+    | CHAVE_E CHAVE_D 
+        { $$ = cria_no("bloco_vazio", NULL, 0); }
     ;
 
 %%
 
-void yyerror(const char *s) {
-    if (yychar == YYEMPTY) {
-        fprintf(stderr, "Erro sintatico: %s na linha %d, coluna %d\n", s, linha, coluna);
+void erro_semantico(const char *msg, const char *detalhe) {
+    if (detalhe != NULL && strlen(detalhe) > 0) {
+        fprintf(stderr, "Erro semantico: %s '%s' na linha %d\n", msg, detalhe, linha);
     } else {
-        fprintf(stderr, "Erro sintatico: %s proximo do token '%s' na linha %d, coluna %d\n", s, yytext, linha, coluna);
+        fprintf(stderr, "Erro semantico: %s na linha %d\n", msg, linha);
     }
+}
+
+void yyerror(const char *s) {
+    //fprintf(stderr, "Erro sintatico: %s na linha %d\n", s, linha);
 }
 
 int main(int argc, char **argv) {
@@ -330,12 +327,11 @@ int main(int argc, char **argv) {
     char arquivo[256];
 
     do {
-        printf("\nMenu:\n");
+        printf("\nMenu Miniclang:\n");
         printf("1. Inserir arquivo de teste\n");
         printf("2. Mostrar arvore sintatica\n");
         printf("3. Mostrar tabela de simbolos\n");
-        printf("4. Palavras reservadas\n");
-        printf("5. Sair\n");
+        printf("4. Sair\n");
         printf("Escolha uma opcao: ");
         scanf("%d", &opcao);
 
@@ -348,7 +344,7 @@ int main(int argc, char **argv) {
                     perror("Erro ao abrir arquivo");
                     break;
                 }
-                printf("Iniciando analise do arquivo '%s'...\n", arquivo);
+                printf("Iniciando analise...\n");
                 raiz_arvore = NULL;
                 yyparse();
                 printf("Analise finalizada.\n");
@@ -358,26 +354,22 @@ int main(int argc, char **argv) {
 
             case 2:
                 if (raiz_arvore) {
-                    printf("\narvore sintatica:\n");
+                    printf("\nArvore Sintatica:\n");
                     imprime_arvore(raiz_arvore);
                 } else {
-                    printf("Nenhuma arvore para mostrar. Execute a analise primeiro.\n");
+                    printf("Execute a analise primeiro (Opcao 1).\n");
                 }
                 break;
             case 3:
                 imprimir_simbolos();
                 break;
             case 4:
-                imprimir_palavras_reservadas();
-                break;
-            case 5:
                 printf("Saindo...\n");
                 break;
-
             default:
-                printf("Opcao invalida. Tente novamente.\n");
+                printf("Opcao invalida.\n");
         }
-    } while (opcao != 5);
+    } while (opcao != 4);
 
     return 0;
 }
