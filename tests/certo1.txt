@@ -1,3 +1,4 @@
+#arquivo correto para teste
 int calcular(int valor) {
     int dobro;
     dobro <- valor * 2;
