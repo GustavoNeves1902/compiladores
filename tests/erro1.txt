@@ -1,3 +1,4 @@
+#arquivo com erros para teste
 int main() {
     int a;
     string s;
