@@ -1,9 +1,0 @@
-/* testando
-comentario*/  
-int main(){
-  for (int a=1; a<5; a++){
-	if(a == b){
-		return a;
-		}
-}
-}
