@@ -1,3 +1,0 @@
-int funcao(int a, int b, int c){
-	int d = funcao2(a);
-	}

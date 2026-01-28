@@ -1,0 +1,18 @@
+int calcular(int valor) {
+    int dobro;
+    dobro <- valor * 2;
+    return dobro;
+}
+
+int main() {
+    int x;
+    int resultado;
+    float preco;
+    
+    x <- 10;
+    preco <- 45.5;
+    
+    if (x > 5) {
+        resultado <- calcular(x);
+    }
+}
