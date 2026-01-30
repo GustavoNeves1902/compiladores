@@ -128,6 +128,16 @@ expressao
             $$ = cria_no("ATRIBUICAO_EXPR", filhos, 3);
             $$->tipo_dado = $1->tipo_dado;
         }
+    | expressao ATRIBUICAO_CONDICIONAL error 
+        { 
+            erro_semantico("Falta o valor ou expressao para a atribuicao", ""); 
+            yyerrok; 
+        }
+    | expressao OPERADOR_ATRIBUICAO error 
+        { 
+            erro_semantico("Falta o valor ou expressao para a atribuicao", ""); 
+            yyerrok; 
+        }
       | expressao OPERADOR_ATRIBUICAO expressao
         {
             if ($1->tipo_dado != $3->tipo_dado && !($1->tipo_dado == T_FLOAT && $3->tipo_dado == T_INT)) {
@@ -137,18 +147,7 @@ expressao
             $$ = cria_no("ATRIBUICAO_SIMPLES", filhos, 3);
             $$->tipo_dado = $1->tipo_dado;
         }
-        | expressao ATRIBUICAO_CONDICIONAL error 
-        { 
-            erro_semantico("Falta o valor ou expressao para a atribuicao", ""); 
-            yyerrok; 
-            yyclearin;
-        }
-    | expressao OPERADOR_ATRIBUICAO error 
-        { 
-            erro_semantico("Falta o valor ou expressao para a atribuicao", ""); 
-            yyerrok; 
-            yyclearin;
-        }
+        
         | expressao MAIOR_QUE expressao
         {
             no *filhos[3] = { $1, cria_no(">", NULL, 0), $3 };
@@ -277,19 +276,15 @@ estrutura_controle
           no *filhos[2] = { $3, $5 };
           $$ = cria_no("IF", filhos, 2);
         }
-    /* REGRA PARA CAPTURAR O ERRO DE PARÊNTESES */
-    | IF expressao CHAVE_E lista_declaracoes CHAVE_D
-        {
-            erro_semantico("Estrutura IF mal formada: faltam os parenteses '(' e ')'", "");
-            yyerrok;
-            $$ = cria_no("IF_ERRO", NULL, 0);
-        }
-    /* REGRA DE ERRO GENÉRICA */
-    | IF error bloco 
+    /* Sincroniza logo no início do bloco */
+    | IF error CHAVE_E 
         { 
-            erro_semantico("Erro sintatico no IF", "");
+            printf("Erro sintatico: IF mal formado na linha %d\n", linha);
             yyerrok; 
-            $$ = cria_no("IF_ERRO", NULL, 0);
+        }
+      lista_declaracoes CHAVE_D
+        { 
+            $$ = cria_no("IF_ERRO", NULL, 0); 
         }
     ;
 
